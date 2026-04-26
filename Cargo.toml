@@ -1,0 +1,16 @@
+[package]
+name = "otel-log-wrapper"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Zero-config OpenTelemetry tracing/logging setup around init-tracing-opentelemetry"
+keywords = ["opentelemetry", "otel", "tracing", "logging"]
+
+[dependencies]
+init-tracing-opentelemetry = { version = "0.36.1", features = ["otlp", "tonic", "metrics", "tracing_subscriber_ext"] }
+opentelemetry = "0.31"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json", "registry"] }
+
+[dev-dependencies]
+serial_test = "3"
