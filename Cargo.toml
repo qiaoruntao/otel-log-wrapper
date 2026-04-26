@@ -5,6 +5,7 @@ edition = "2021"
 license = "MIT"
 description = "Zero-config OpenTelemetry tracing/logging setup around init-tracing-opentelemetry"
 keywords = ["opentelemetry", "otel", "tracing", "logging"]
+repository = "https://github.com/qiaoruntao/otel-log-wrapper"
 
 [dependencies]
 init-tracing-opentelemetry = { version = "0.36.1", features = ["otlp", "tonic", "metrics", "tracing_subscriber_ext"] }
