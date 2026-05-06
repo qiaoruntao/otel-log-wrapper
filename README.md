@@ -93,6 +93,14 @@ Merging behavior:
 
 The startup line prints the final effective directive string unless you disable it with `.startup_message(false)`.
 
+## Publish Checklist
+
+Before `cargo publish`:
+
+- run `cargo test`
+- check for unused direct dependencies and remove them before publishing
+- verify the crate still builds with the intended default features
+
 Available formats:
 
 - `LoggerFormat::Human`

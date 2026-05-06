@@ -15,7 +15,6 @@ detect-host = ["dep:hostname"]
 init-tracing-opentelemetry = { version = "0.36.1", features = ["otlp", "tonic", "metrics", "tracing_subscriber_ext"] }
 opentelemetry = "0.31"
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json", "registry"] }
 hostname = { version = "0", optional = true }
 
 [dev-dependencies]
