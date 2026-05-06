@@ -54,6 +54,7 @@ The default setup:
 - sets `OTEL_SERVICE_NAME` from the service name when unset
 - sets `OTEL_EXPORTER_OTLP_ENDPOINT` to `http://localhost:4317` when unset
 - sets `OTEL_EXPORTER_OTLP_PROTOCOL` to `grpc` when unset
+- adds `host.name` to `OTEL_RESOURCE_ATTRIBUTES` when the default `detect-host` feature is enabled
 - respects `RUST_LOG`, then `OTEL_LOG_LEVEL`, then falls back to `info`
 - uses human-readable stdout logs by default
 - initializes a global `tracing-subscriber`
@@ -63,7 +64,7 @@ The default setup:
 Example startup message:
 
 ```text
-otel-log-wrapper init service=my-service version=0.1.0 commit=abc1234 endpoint=http://localhost:4317 protocol=grpc format=human metrics=true level=RUST_LOG|OTEL_LOG_LEVEL|info
+otel-log-wrapper init service=my-service version=0.1.0 commit=abc1234 endpoint=http://localhost:4317 protocol=grpc format=human metrics=true level=my-service=info,hyper=off,my-service=debug
 ```
 
 ## Customization
@@ -74,11 +75,23 @@ use tracing::level_filters::LevelFilter;
 
 LoggerConfig::builder("my-service")
     .endpoint("http://collector:4317")
+    .log_directives("my-service=info,hyper=off,tonic=off,h2=off,reqwest=off")
     .format(LoggerFormat::Json)
     .default_level(LevelFilter::INFO)
     .startup_message(false)
     .init()?;
 ```
+
+`log_directives` uses the same directive format as `RUST_LOG`.
+
+Merging behavior:
+
+- if `log_directives` is unset, the crate falls back to `RUST_LOG`, then `OTEL_LOG_LEVEL`, then `info`
+- if `log_directives` is set and `RUST_LOG` is unset, the crate uses `log_directives`
+- if both are set, the crate merges them as `log_directives + "," + RUST_LOG`
+- the later `RUST_LOG` directives win on conflicts, so operators can override library defaults globally
+
+The startup line prints the final effective directive string unless you disable it with `.startup_message(false)`.
 
 Available formats:
 

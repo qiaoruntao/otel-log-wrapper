@@ -280,8 +280,10 @@ pub fn init_logger(config: LoggerConfig) -> Result<&'static LoggerGuard, Error> 
 pub fn init_logger_guard(config: LoggerConfig) -> Result<LoggerGuard, Error> {
     apply_env_defaults(&config);
 
+    let effective_log_directives = effective_log_directives(&config);
+
     if config.startup_message {
-        print_startup_message(&config);
+        print_startup_message(&config, effective_log_directives.as_deref());
     }
 
     let mut resource = DetectResource::default().with_fallback_service_name(config.service_name);
@@ -298,7 +300,7 @@ pub fn init_logger_guard(config: LoggerConfig) -> Result<LoggerGuard, Error> {
         .with_otel_tracer_name(config.service_name)
         .with_resource_config(resource);
 
-    let tracing_config = if let Some(directives) = config.log_directives {
+    let tracing_config = if let Some(directives) = effective_log_directives {
         tracing_config.with_log_directives(directives)
     } else {
         tracing_config
@@ -317,7 +319,12 @@ fn apply_env_defaults(config: &LoggerConfig) {
         "OTEL_EXPORTER_OTLP_PROTOCOL",
         config.protocol.as_deref().unwrap_or(DEFAULT_PROTOCOL),
     );
-    merge_resource_attributes(config.build_metadata.resource_attributes());
+    merge_resource_attributes(
+        config
+            .build_metadata
+            .resource_attributes()
+            .chain(detect_host_resource_attribute()),
+    );
 }
 
 fn set_env_if_missing(key: &str, value: &str) {
@@ -351,15 +358,55 @@ fn merge_resource_attributes(attributes: impl Iterator<Item = (&'static str, &'s
     }
 }
 
-fn print_startup_message(config: &LoggerConfig) {
+fn effective_log_directives(config: &LoggerConfig) -> Option<String> {
+    let local = config
+        .log_directives
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let rust_log = std::env::var("RUST_LOG").ok().and_then(|value| {
+        let trimmed = value.trim().to_string();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed)
+        }
+    });
+
+    match (local, rust_log) {
+        (Some(local), Some(rust_log)) => Some(format!("{local},{rust_log}")),
+        (Some(local), None) => Some(local.to_string()),
+        (None, Some(rust_log)) => Some(rust_log),
+        (None, None) => None,
+    }
+}
+
+#[cfg(feature = "detect-host")]
+fn detect_host_resource_attribute() -> impl Iterator<Item = (&'static str, &'static str)> {
+    hostname::get()
+        .ok()
+        .and_then(|value| value.into_string().ok())
+        .filter(|value| !value.trim().is_empty())
+        .map(leak_owned_string)
+        .map(|host| ("host.name", host))
+        .into_iter()
+}
+
+#[cfg(not(feature = "detect-host"))]
+fn detect_host_resource_attribute() -> impl Iterator<Item = (&'static str, &'static str)> {
+    std::iter::empty()
+}
+
+fn leak_owned_string(value: String) -> &'static str {
+    Box::leak(value.into_boxed_str())
+}
+
+fn print_startup_message(config: &LoggerConfig, effective_log_directives: Option<&str>) {
     let endpoint = config.endpoint.as_deref().unwrap_or(DEFAULT_ENDPOINT);
     let protocol = config.protocol.as_deref().unwrap_or(DEFAULT_PROTOCOL);
     let version = config.service_version.unwrap_or("unknown");
     let commit = config.build_metadata.commit_short.unwrap_or("unknown");
-    let level = config
-        .log_directives
-        .as_deref()
-        .unwrap_or("RUST_LOG|OTEL_LOG_LEVEL|info");
+    let level = effective_log_directives.unwrap_or("RUST_LOG|OTEL_LOG_LEVEL|info");
 
     println!(
         "otel-log-wrapper init service={} version={} commit={} endpoint={} protocol={} format={} metrics={} level={}",
@@ -407,7 +454,7 @@ mod tests {
         let config = LoggerConfig::builder("test-service")
             .endpoint("http://collector:4317")
             .protocol("grpc")
-            .log_directives("debug")
+            .log_directives("my_bin=info,hyper=off")
             .default_level(LevelFilter::DEBUG)
             .format(LoggerFormat::Compact)
             .metrics(false)
@@ -423,7 +470,7 @@ mod tests {
         assert_eq!(config.service_name, "test-service");
         assert_eq!(config.endpoint.as_deref(), Some("http://collector:4317"));
         assert_eq!(config.protocol.as_deref(), Some("grpc"));
-        assert_eq!(config.log_directives.as_deref(), Some("debug"));
+        assert_eq!(config.log_directives.as_deref(), Some("my_bin=info,hyper=off"));
         assert_eq!(config.default_level, LevelFilter::DEBUG);
         assert!(matches!(config.format, LoggerFormat::Compact));
         assert!(!config.metrics);
@@ -469,16 +516,72 @@ mod tests {
             std::env::var("OTEL_EXPORTER_OTLP_PROTOCOL").as_deref(),
             Ok("http/protobuf")
         );
-        assert_eq!(
-            std::env::var("OTEL_RESOURCE_ATTRIBUTES").as_deref(),
-            Ok("vcs.commit.short=abc1234")
-        );
+        let attrs = std::env::var("OTEL_RESOURCE_ATTRIBUTES").unwrap();
+        assert!(attrs.contains("vcs.commit.short=abc1234"));
+        #[cfg(feature = "detect-host")]
+        assert!(attrs.contains("host.name="));
 
         unsafe {
             std::env::remove_var("OTEL_SERVICE_NAME");
             std::env::remove_var("OTEL_EXPORTER_OTLP_ENDPOINT");
             std::env::remove_var("OTEL_EXPORTER_OTLP_PROTOCOL");
             std::env::remove_var("OTEL_RESOURCE_ATTRIBUTES");
+        }
+    }
+
+    #[test]
+    fn effective_log_directives_uses_local_when_env_absent() {
+        unsafe {
+            std::env::remove_var("RUST_LOG");
+        }
+
+        let config = LoggerConfig::builder("test-service")
+            .log_directives("my_bin=info,hyper=off")
+            .build();
+
+        assert_eq!(
+            effective_log_directives(&config).as_deref(),
+            Some("my_bin=info,hyper=off")
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn effective_log_directives_prefers_rust_log_on_conflict() {
+        unsafe {
+            std::env::set_var("RUST_LOG", "my_bin=debug,hyper=info");
+        }
+
+        let config = LoggerConfig::builder("test-service")
+            .log_directives("my_bin=info,hyper=off")
+            .build();
+
+        assert_eq!(
+            effective_log_directives(&config).as_deref(),
+            Some("my_bin=info,hyper=off,my_bin=debug,hyper=info")
+        );
+
+        unsafe {
+            std::env::remove_var("RUST_LOG");
+        }
+    }
+
+    #[test]
+    #[serial]
+    fn effective_log_directives_uses_rust_log_without_local_directives() {
+        unsafe {
+            std::env::set_var("RUST_LOG", "warn,my_bin=debug");
+        }
+
+        let config = LoggerConfig::builder("test-service").build();
+
+        assert_eq!(
+            effective_log_directives(&config).as_deref(),
+            Some("warn,my_bin=debug")
+        );
+
+        unsafe {
+            std::env::remove_var("RUST_LOG");
         }
     }
 }
