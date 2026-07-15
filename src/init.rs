@@ -44,6 +44,7 @@ pub fn init_logger_guard(config: LoggerConfig) -> Result<LoggerGuard, Error> {
         .format
         .apply(TracingConfig::production())
         .with_default_level(config.default_level)
+        .with_logs(true)
         .with_metrics(config.metrics)
         .with_global_subscriber(config.global_subscriber)
         .with_otel_tracer_name(config.service_name)
