@@ -117,9 +117,18 @@ otel-log-wrapper init service=my-service version=0.1.0 commit=abc1234 endpoint=h
 use otel_log_wrapper::{LoggerConfig, LoggerFormat};
 use tracing::level_filters::LevelFilter;
 
-LoggerConfig::builder("my-service")
+// Cargo bin/crate names containing a hyphen (e.g. "my-service") are
+// normalized to underscores in the actual tracing target ("my_service").
+// Always build directive targets with `normalize_target`, not the raw
+// Cargo name -- a directive built from the raw hyphenated name silently
+// matches nothing and disables logging for that target with no error.
+// (A hyphen-free name like "myservice" normalizes to itself, so this is
+// always safe to call unconditionally.)
+let target = LoggerConfig::normalize_target(env!("CARGO_BIN_NAME"));
+
+LoggerConfig::builder(env!("CARGO_BIN_NAME"))
     .endpoint("http://collector:4317")
-    .log_directives("my-service=info,hyper=off,tonic=off,h2=off,reqwest=off")
+    .log_directives(format!("{target}=info,hyper=off,tonic=off,h2=off,reqwest=off"))
     .format(LoggerFormat::Json)
     .default_level(LevelFilter::INFO)
     .startup_message(false)
@@ -127,6 +136,12 @@ LoggerConfig::builder("my-service")
 ```
 
 `log_directives` uses the same directive format as `RUST_LOG`.
+
+If a directive target still contains a hyphen at init time (e.g. someone
+passed a raw Cargo name instead of the normalized form), the crate prints
+an `otel-log-wrapper warning: ...` line to stderr before installing the
+subscriber -- treat that warning as a bug in the caller, not something to
+silence.
 
 Merging behavior:
 
