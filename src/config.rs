@@ -28,40 +28,6 @@ impl LoggerConfig {
         }
     }
 
-    /// Normalizes a Cargo identifier (e.g. `env!("CARGO_BIN_NAME")` or
-    /// `env!("CARGO_PKG_NAME")`) into the form `tracing` actually uses as
-    /// an event/span target.
-    ///
-    /// Rust silently replaces `-` with `_` when turning a crate/binary name
-    /// into a module path, so a hyphenated Cargo name (any binary declared
-    /// with a hyphen, e.g. `my-service`) never matches a `tracing_subscriber`
-    /// filter directive built from the raw hyphenated string: `my-service=info`
-    /// filters against the literal target `my-service`, but every event in
-    /// that binary is actually emitted under the target `my_service`. The
-    /// directive silently falls through to whatever default level applies
-    /// (commonly `off`), so no logs, spans, or otel export ever happen --
-    /// with no error, warning, or crash to point at the cause.
-    ///
-    /// Always build filter directives from this normalized form, not the
-    /// raw Cargo name:
-    ///
-    /// ```no_run
-    /// use otel_log_wrapper::LoggerConfig;
-    ///
-    /// // In practice pass env!("CARGO_BIN_NAME") here; hardcoded for the doctest.
-    /// let bin_name = "my-service";
-    /// let target = LoggerConfig::normalize_target(bin_name);
-    /// LoggerConfig::builder(bin_name)
-    ///     .log_directives(format!("off,{target}=info"))
-    ///     .startup_message(false)
-    ///     .init_guard()
-    ///     .ok();
-    /// ```
-    #[must_use]
-    pub fn normalize_target(cargo_name: &str) -> String {
-        cargo_name.replace('-', "_")
-    }
-
     #[must_use]
     pub fn new(service_name: &'static str) -> Self {
         Self {
@@ -251,26 +217,5 @@ fn non_empty(value: &'static str) -> Option<&'static str> {
         None
     } else {
         Some(value)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::LoggerConfig;
-
-    #[test]
-    fn normalize_target_replaces_hyphens_with_underscores() {
-        assert_eq!(
-            LoggerConfig::normalize_target("stripchat-looper"),
-            "stripchat_looper"
-        );
-        assert_eq!(
-            LoggerConfig::normalize_target("already_underscored"),
-            "already_underscored"
-        );
-        assert_eq!(
-            LoggerConfig::normalize_target("multi-part-name"),
-            "multi_part_name"
-        );
     }
 }

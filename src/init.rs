@@ -30,7 +30,6 @@ pub fn init_logger_guard(config: LoggerConfig) -> Result<LoggerGuard, Error> {
     apply_env_defaults(&config);
 
     let effective_log_directives = effective_log_directives(&config);
-    warn_on_hyphenated_directive_targets(effective_log_directives.as_deref());
 
     if config.startup_message {
         print_startup_message(&config, effective_log_directives.as_deref());
@@ -150,39 +149,6 @@ fn detect_host_resource_attribute() -> impl Iterator<Item = (&'static str, &'sta
 
 fn leak_owned_string(value: String) -> &'static str {
     Box::leak(value.into_boxed_str())
-}
-
-/// Warns (once, to stderr, before any subscriber is installed) about
-/// filter-directive targets that contain a hyphen. `tracing` event/span
-/// targets always use the underscore-normalized crate/module path, so a
-/// directive like `my-service=info` can never match anything -- it silently
-/// disables logging for that target instead of erroring. This is a plain
-/// `eprintln!` rather than a `tracing::warn!` because the subscriber isn't
-/// installed yet, and because the whole point is to be visible even when
-/// every directive in the string is otherwise wrong.
-fn warn_on_hyphenated_directive_targets(directives: Option<&str>) {
-    let Some(directives) = directives else {
-        return;
-    };
-    for clause in directives.split(',') {
-        let clause = clause.trim();
-        // A bare level (e.g. "info", "off") has no target/'=' component.
-        let Some((target, _level)) = clause.split_once('=') else {
-            continue;
-        };
-        // Directives may carry a span-field selector after '['; only the
-        // target portion (before '[') is a module path that can be hyphenated.
-        let target = target.split('[').next().unwrap_or(target);
-        if target.contains('-') {
-            eprintln!(
-                "otel-log-wrapper warning: log directive target {target:?} contains a hyphen; \
-                 tracing always normalizes crate/module names to underscores, so this directive \
-                 can never match any event or span and silently disables logging for it. Build \
-                 the target with LoggerConfig::normalize_target(...) instead of a raw hyphenated \
-                 Cargo name."
-            );
-        }
-    }
 }
 
 fn print_startup_message(config: &LoggerConfig, effective_log_directives: Option<&str>) {
